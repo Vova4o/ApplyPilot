@@ -19,6 +19,8 @@ ApplyPilot — локальный инструмент для поиска ва�
 
 CLI остаётся самостоятельным интерфейсом. Веб-панель — опциональная оболочка над теми же командами и приватными артефактами.
 
+Публичный сценарий установки и проверки без папки `private/`: [docs/QUICKSTART.md](docs/QUICKSTART.md).
+
 ## Актуальный AI-only конвейер (22.10.2026)
 
 Действующее решение владельца: **массовый поиск и отклики по AI/LLM/агентам, без искусственного дробления на 3–10 вакансий**. Текущий трек — `ai_core`, резюме `AI/LLM Engineer / AI Agent Engineer`, удалённая работа из РФ, зарплата желательно от 120 000 ₽, без опубликованной зарплаты не исключать. Обычный Backend/Go/Fullstack не смешивать с AI-only рассылкой. Подробный локальный запуск: `private/current/00_START_HERE.md` (локально, не в Git). Историю не читать как актуальные инструкции.
@@ -41,6 +43,74 @@ APPLYPILOT_INTERACTIVE=1 .venv/bin/python -m applypilot --profile private/config
 ```
 
 Приватные рабочие профили AI имеют `per_run=100` и `per_day=300` вместо старых пилотных значений; `--limit 100` нужно явно указать в CLI. Это максимальная ёмкость, не обязанность посылать неподходящие отклики. Решения `APPROVED` и история HH хранятся в SQLite. CAPTCHA после submit и `UNKNOWN` не ретраятся вслепую, чтобы не создавать дубликаты. Сопроводительные и анкеты не блокируют обработку остальных подходящих заявок, но вопросы с неизвестными личными фактами требуют проверки.
+
+## Multi-Source (этап 2)
+
+Единый конвейер для HH, Habr Career, Getmatch, GeekJob, Карьеры Яндекса и DreamJob.
+Подробности и матрица готовности: [docs/MULTISOURCE.md](docs/MULTISOURCE.md).
+
+```bash
+# Явные метки аккаунтов; cookies сюда не пишутся.
+cp examples/sources.toml private/config/sources.toml
+
+# Публичная офлайн-проверка на синтетических fixtures (работает без private/).
+.venv/bin/python -m applypilot sources scan --track default \
+  --fixture-dir tests/fixtures/public --json
+
+# Живой поиск, затем review и dry-run по конкретному источнику.
+.venv/bin/python -m applypilot sources scan --track ai_core --limit 100
+.venv/bin/python -m applypilot sources status --track ai_core
+.venv/bin/python -m applypilot queue list --track ai_core --source getmatch.ru --view review
+.venv/bin/python -m applypilot sources plan --track ai_core --source getmatch.ru
+.venv/bin/python -m applypilot sources dispatch-plan --track ai_core --limit 100 --json
+.venv/bin/python -m applypilot sources approve-batch --track ai_core --source getmatch.ru \
+  --id VACANCY_ID --state APPROVED --reason 'подходит по стеку'
+.venv/bin/python -m applypilot sources dispatch-apply --track ai_core --limit 100 --json
+
+# Вход/проверка сессии источника (выполняется вручную, не фоновой задачей).
+.venv/bin/python -m applypilot sources login --source career.habr.com
+.venv/bin/python -m applypilot sources check --source career.habr.com
+```
+
+Не-HH формы откликов пока имеют `needs_live_validation`: поиск и рейтинг работают,
+реальная отправка отключена до отдельной проверки авторизованных форм. DreamJob —
+read-only зеркало HH и не создаёт второй канал отклика. `dispatch-apply` по
+умолчанию dry-run; live требует `--allow-live` и проверенного драйвера источника.
+
+Сохранённые сообщения `@g_jobbot` связываются с очередью без повторного логина:
+
+```bash
+.venv/bin/python -m applypilot accounts telegram-import --track ai_core --json
+```
+
+Кликеры Habr/GeekJob/Яндекса/Getmatch предоставляют только `preflight` и
+read-only `inspect`; `submit_verified=false` до живой проверки формы.
+
+## Аккаунты Telegram и HH OAuth (этап 3)
+
+Локальные клиенты для реальных аккаунтов добавлены отдельно и не заменяют
+существующий HH-кликер:
+
+```bash
+pip install -e '.[telegram]'
+applypilot accounts telegram-setup          # API_ID/API_HASH, скрытый ввод
+applypilot accounts telegram-login --phone +<номер>
+applypilot accounts telegram-sync --limit 50 --json
+applypilot accounts hh-oauth-setup          # client_id/secret, скрытый ввод
+applypilot accounts hh-oauth-authorize
+applypilot accounts hh-oauth-exchange       # вставить полный redirect URL
+applypilot accounts hh-oauth-status --online
+applypilot accounts hh-oauth-negotiations --limit 20 --json
+applypilot accounts hh-oauth-messages --negotiation-id <id> --json
+```
+
+Секреты хранятся только в `private/data/**` с правами `0600`, каталоги
+аккаунтов — `0700`; значения не выводятся в CLI/JSON/UI и не попадают в Git.
+OAuth state обязателен на каждом обмене, живёт 10 минут и удаляется после
+успешного обмена. Отправка через Telegram callback и `POST /negotiations` HH
+имеет статус `needs_live_validation` и по умолчанию заблокирована.
+Подробности, статусы и чек-лист живой проверки:
+[`docs/ACCOUNTS.md`](docs/ACCOUNTS.md).
 
 ## Быстрый старт
 
@@ -561,8 +631,9 @@ bash packaging/build-deb.sh
 
 ```bash
 .venv/bin/python -m pytest -q
-.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff check src tests scripts
 .venv/bin/python scripts/check_public.py
+.venv/bin/python scripts/offline_multisource_smoke.py
 .venv/bin/python -m build
 git diff --check
 ```
