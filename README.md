@@ -21,121 +21,39 @@ CLI остаётся самостоятельным интерфейсом. Ве
 
 Публичный сценарий установки и проверки без папки `private/`: [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
-## Актуальный AI-only конвейер (22.10.2026)
+## Настройка сценария работы
 
-Действующее решение владельца: **массовый поиск и отклики по AI/LLM/агентам, без искусственного дробления на 3–10 вакансий**. Текущий трек — `ai_core`, резюме `AI/LLM Engineer / AI Agent Engineer`, удалённая работа из РФ, зарплата желательно от 120 000 ₽, без опубликованной зарплаты не исключать. Обычный Backend/Go/Fullstack не смешивать с AI-only рассылкой. Подробный локальный запуск: `private/current/00_START_HERE.md` (локально, не в Git). Историю не читать как актуальные инструкции.
+Поиск, резюме, зарплатные ожидания, география, лимиты и решения по вакансиям задаются пользователем **локально** в `private/` и не должны попадать в публичный репозиторий.
+Начните с обезличенных примеров `examples/` и [публичного quickstart](docs/QUICKSTART.md). Параметры и результаты частных кампаний не являются частью документации продукта.
 
-```bash
-# Один проход поиска. Не требует повторного пересогласования после каждого запуска.
-.venv/bin/python -m applypilot run campaign --track ai_core --days 30 --pages 2 --request-budget 280 --details-limit 240 --limit 100 --remote --salary-from 120000 --salary-currency RUR --sort-mode balanced
+## Multi-Source
 
-# Одобрить весь подходящий пул, а не только первую десятку; список ID задаётся из проверенной выборки.
-.venv/bin/python -m applypilot queue list --track ai_core --view top --limit 100
-.venv/bin/python -m applypilot queue batch-set --track ai_core --id VACANCY_ID --state APPROVED --reason 'AI/LLM задачи и условия соответствуют профилю'
-
-# Реальные заявки, до 100 за запуск, при наличии соответствующего числа кандидатов.
-.venv/bin/python -m applypilot sync --track ai_core
-.venv/bin/python -m applypilot --profile private/config/profile-ai-bulk-approved-20261021.toml queue apply --track ai_core --limit 100 --dry-run
-.venv/bin/python -m applypilot --profile private/config/profile-ai-bulk-approved-20261021.toml queue apply --track ai_core --limit 100 --run --headless
-
-# Когда HH показывает CAPTCHA — видимый интерактивный Chrome и ручное прохождение проверки.
-APPLYPILOT_INTERACTIVE=1 .venv/bin/python -m applypilot --profile private/config/profile-ai-bulk-approved-20261021.toml queue apply --track ai_core --limit 100 --run --visible
-```
-
-Приватные рабочие профили AI имеют `per_run=100` и `per_day=300` вместо старых пилотных значений; `--limit 100` нужно явно указать в CLI. Это максимальная ёмкость, не обязанность посылать неподходящие отклики. Решения `APPROVED` и история HH хранятся в SQLite. CAPTCHA после submit и `UNKNOWN` не ретраятся вслепую, чтобы не создавать дубликаты. Сопроводительные и анкеты не блокируют обработку остальных подходящих заявок, но вопросы с неизвестными личными фактами требуют проверки.
-
-## Multi-Source (этап 2)
-
-Единый конвейер для HH, Habr Career, Getmatch, GeekJob, Карьеры Яндекса и DreamJob.
-Подробности и матрица готовности: [docs/MULTISOURCE.md](docs/MULTISOURCE.md).
+ApplyPilot поддерживает отдельные адаптеры HH.ru, Habr Career, Getmatch, GeekJob, Яндекс Карьеры и DreamJob. Возможности провайдеров и ограничения описаны в [docs/MULTISOURCE.md](docs/MULTISOURCE.md).
 
 ```bash
-# Явные метки аккаунтов; cookies сюда не пишутся.
 cp examples/sources.toml private/config/sources.toml
 
-# Публичная офлайн-проверка на синтетических fixtures (работает без private/).
+# Публичный тест на синтетических данных (без аккаунтов и отправок)
 .venv/bin/python -m applypilot sources scan --track default \
   --fixture-dir tests/fixtures/public --json
 
-# Живой поиск, затем review и dry-run по конкретному источнику.
-.venv/bin/python -m applypilot sources scan --track ai_core --limit 100
-.venv/bin/python -m applypilot sources status --track ai_core
-.venv/bin/python -m applypilot queue list --track ai_core --source getmatch.ru --view review
-.venv/bin/python -m applypilot sources plan --track ai_core --source getmatch.ru
-.venv/bin/python -m applypilot sources dispatch-plan --track ai_core --limit 100 --json
-.venv/bin/python -m applypilot sources approve-batch --track ai_core --source getmatch.ru \
-  --id VACANCY_ID --state APPROVED --reason 'подходит по стеку'
-.venv/bin/python -m applypilot sources dispatch-apply --track ai_core --limit 100 --json
-
-# Вход/проверка сессии источника (выполняется вручную, не фоновой задачей).
-.venv/bin/python -m applypilot sources login --source career.habr.com
-.venv/bin/python -m applypilot sources check --source career.habr.com
-.venv/bin/python -m applypilot sources form-audit --track ai_core \
-  --source career.habr.com --view review --limit 100 --json
+# Просмотр источников, найденных вакансий и общего dry-run
+.venv/bin/python -m applypilot sources list
+.venv/bin/python -m applypilot sources status --track default
+.venv/bin/python -m applypilot sources dispatch-plan --track default --limit 20 --json
 ```
 
-У Habr Career есть проверенный native-one-click с отдельным CLI-флагом:
-`dispatch-apply --allow-live --enable-habr`, контролируемым интервалом и
-проверкой ответа в истории. `form-audit` только читает страницы и помогает
-агенту оценить пакет форм без откликов. GeekJob, Getmatch, Яндекс пока имеют
-`needs_live_validation`. DreamJob — зеркало HH без второго отклика.
-По умолчанию `dispatch-apply` всегда dry-run.
+Реальные отклики требуют отдельного включения live-режима, предварительного одобрения конкретных вакансий и подтверждения результата. Истории отправок и параметры подключённых аккаунтов остаются приватными.
 
-Сохранённые сообщения `@g_jobbot` связываются с очередью без повторного логина.
-Getmatch умеет отдельно читать подтверждённые прошлые отклики и проводить
-строго одиночную проверку Telegram-кнопки без отправки:
+## Подключение аккаунтов
+
+Для чтения Telegram и HH OAuth предусмотрены локальные клиенты. Вход выполняет владелец установки; коды, токены, cookies и данные аккаунтов не публикуются.
+Общие инструкции приведены в [docs/ACCOUNTS.md](docs/ACCOUNTS.md).
 
 ```bash
-.venv/bin/python -m applypilot accounts telegram-sync --limit 500
-.venv/bin/python -m applypilot accounts telegram-import --track ai_core --limit 500
-.venv/bin/python -m applypilot accounts telegram-reconcile --track ai_core --limit 500
-.venv/bin/python -m applypilot accounts telegram-pilot --track ai_core \
-  --id VACANCY_ID --probe-live --json
+applypilot accounts --help
+applypilot sources list
 ```
-
-Нативный callback Getmatch успешно проверен одной реальной отправкой
-с подтверждением официального бота и сохранением в SQLite. Для
-последовательных отправок есть защищённый `GetmatchCallbackDriver`,
-подключённый к `dispatch-apply --enable-getmatch`; требуется отдельный
-`--allow-live`, `APPLYPILOT_TELEGRAM_LIVE=1`, подтверждённый профиль
-и предварительно APPROVED вакансии. Пакетная устойчивость проверена
-тестами, но большой живой объём ещё не проверялся. Чаты HR, WebView
-и дополнительные анкеты не считаются автоматически завершёнными.
-
-Нативный Habr-кликер проверен одним реальным откликом с HTTP 200, сообщением
-«Отклик отправлен» и точным совпадением ID в /responses.
-GeekJob теперь имеет подтверждённый **авторизованный DOM** native-формы: выбор
-CV, обязательное индивидуальное письмо и кнопку. Доступны
-`sources form-audit --source geekjob.ru` (только чтение) и защищённый
-`sources geekjob-pilot` (только точная, предварительно одобренная вакансия).
-Реальный GeekJob POST и квитанция **пока не подтверждены**; массовая отправка
-остаётся выключенной. Яндекс также в `needs_live_validation`.
-
-## Аккаунты Telegram и HH OAuth (этап 3)
-
-Локальные клиенты для реальных аккаунтов добавлены отдельно и не заменяют
-существующий HH-кликер:
-
-```bash
-pip install -e '.[telegram]'
-applypilot accounts telegram-setup          # API_ID/API_HASH, скрытый ввод
-applypilot accounts telegram-login --phone +<номер>
-applypilot accounts telegram-sync --limit 50 --json
-applypilot accounts hh-oauth-setup          # client_id/secret, скрытый ввод
-applypilot accounts hh-oauth-authorize
-applypilot accounts hh-oauth-exchange       # вставить полный redirect URL
-applypilot accounts hh-oauth-status --online
-applypilot accounts hh-oauth-negotiations --limit 20 --json
-applypilot accounts hh-oauth-messages --negotiation-id <id> --json
-```
-
-Секреты хранятся только в `private/data/**` с правами `0600`, каталоги
-аккаунтов — `0700`; значения не выводятся в CLI/JSON/UI и не попадают в Git.
-OAuth state обязателен на каждом обмене, живёт 10 минут и удаляется после
-успешного обмена. Отправка через Telegram callback и `POST /negotiations` HH
-имеет статус `needs_live_validation` и по умолчанию заблокирована.
-Подробности, статусы и чек-лист живой проверки:
-[`docs/ACCOUNTS.md`](docs/ACCOUNTS.md).
 
 ## Быстрый старт
 
@@ -166,29 +84,11 @@ OAuth state обязателен на каждом обмене, живёт 10 �
 ```bash
 .venv/bin/python -m applypilot --help
 .venv/bin/python -m applypilot doctor
-.venv/bin/python -m applypilot scan --preset ai-agents-llmops --area 113 --remote --days 7
+.venv/bin/python -m applypilot sources scan --track default --fixture-dir tests/fixtures/public
+.venv/bin/python -m applypilot queue list --track default --view review --limit 20
 ```
 
-Для постоянной очереди используйте **`ai_core`** из `private/config/tracks.toml` (или другой явно выбранный трек). Пример выше — основная команда полного AI-only цикла; здесь команды просмотра и статусов:
-
-```bash
-.venv/bin/python -m applypilot queue list --track ai_core --view top --limit 100
-.venv/bin/python -m applypilot queue list --track ai_core --view needs_letter --limit 100
-.venv/bin/python -m applypilot queue list --track ai_core --view needs_form --limit 100
-.venv/bin/python -m applypilot queue list --track ai_core --view unknown --limit 100
-.venv/bin/python -m applypilot queue history --track ai_core --limit 100
-```
-
-`--limit` — верхняя граница партии, не обязанность добирать её нерелевантными вакансиями. Активный профиль bulk одобрен владельцем; массовая отправка разрешена по команде пользователя, без согласования каждой вакансии. Привязка к правильному резюме, учёт успешных HH-откликов и блокировка повторной отправки `UNKNOWN` сохраняются как технические гарантии.
-
-Глобальные параметры `--data-dir`, `--profile`, `--search` указываются **до** подкоманды:
-
-```bash
-.venv/bin/python -m applypilot \
-  --profile private/config/profile.toml \
-  --search private/config/search.toml \
-  scan --preset ai-agents-llmops
-```
+Для живого поиска создайте собственные треки и профили в `private/`. Публикация личных настроек и фактических результатов работы не требуется.
 
 ## Установка из исходников
 
@@ -312,7 +212,7 @@ private/
 .venv/bin/python -m applypilot plan \
   --preset ai-agents-llmops \
   --input private/data/snapshots/FILE.json \
-  --limit 100 \
+  --limit 20 \
   --min-score 30 \
   --rescore \
   --output private/reports/plan.json
@@ -337,11 +237,11 @@ private/
 export AITUNNEL_API_KEY="..."
 .venv/bin/python -m applypilot screen \
   --input private/data/snapshots/FILE.json \
-  --track ai_core \
+  --track default \
   --model gpt-5-mini \
   --accept fit+maybe \
-  --output private/reports/screen-ai-core.json \
-  --emit-snapshot private/data/snapshots/accepted-ai-core.json
+  --output private/reports/screen-report.json \
+  --emit-snapshot private/data/snapshots/FILE.json
 ```
 
 Вердикты:
@@ -411,11 +311,11 @@ export AITUNNEL_API_KEY="..."
 Если HH показывает вопросы, ApplyPilot сохраняет задачу `form` со статусом `NEEDS_MANUAL`. Захват текста/вариантов вопросов и их безопасная автозапись в этой версии не поддерживаются; задача не превращается в обычный отклик.
 
 ```bash
-.venv/bin/python -m applypilot workflow list --track ai_core
-.venv/bin/python -m applypilot workflow letter-preview --track ai_core --id VACANCY_ID
-.venv/bin/python -m applypilot workflow edit --track ai_core --id TASK_ID --text 'Проверенный текст письма'
-.venv/bin/python -m applypilot workflow approve --track ai_core --id TASK_ID
-.venv/bin/python -m applypilot queue list --track ai_core --view needs_form
+.venv/bin/python -m applypilot workflow list --track default
+.venv/bin/python -m applypilot workflow letter-preview --track default --id VACANCY_ID
+.venv/bin/python -m applypilot workflow edit --track default --id TASK_ID --text 'Проверенный текст письма'
+.venv/bin/python -m applypilot workflow approve --track default --id TASK_ID
+.venv/bin/python -m applypilot queue list --track default --view needs_form
 ```
 
 ### Переписки HH
@@ -425,7 +325,7 @@ export AITUNNEL_API_KEY="..."
 ```bash
 export HH_ACCESS_TOKEN='…'
 .venv/bin/python -m applypilot inbox sync --max-chats 20 --messages-per-chat 20
-.venv/bin/python -m applypilot inbox list --limit 100
+.venv/bin/python -m applypilot inbox list --limit 20
 ```
 
 ### Резюме и треки
@@ -479,50 +379,15 @@ export HH_ACCESS_TOKEN='…'
 
 ### Режимы браузера
 
-Реальный `apply` по умолчанию идёт в **visible**-режиме: открывается обычное окно
-Chrome, и при CAPTCHA его можно пройти руками. Процесс ждёт до
-`[browser] manual_captcha_timeout_seconds` (по умолчанию 300 с), не повторяя
-финальный клик.
+Отдельный приватный профиль браузера используется для авторизованных действий. В visible-режиме пользователь может вручную пройти CAPTCHA; в headless-режиме окно не показывается. `UNKNOWN` никогда не означает разрешение повторить отправку.
 
 ```bash
-# видимое окно, ручная CAPTCHA (по умолчанию)
+.venv/bin/python -m applypilot apply --input FILE.json --dry-run
+# Реальную отправку выполняют только по явному разрешению:
 .venv/bin/python -m applypilot apply --input FILE.json --run --visible
-
-# без окна: быстрее, но CAPTCHA пройти нельзя
-.venv/bin/python -m applypilot apply --input FILE.json --run --headless
-
-# то же для постоянной AI-only очереди (100/run, 300/day в bulk-профиле)
-APPLYPILOT_INTERACTIVE=1 .venv/bin/python -m applypilot --profile private/config/profile-ai-bulk-approved-20261021.toml queue apply --track ai_core --limit 100 --run --visible
-.venv/bin/python -m applypilot --profile private/config/profile-ai-bulk-approved-20261021.toml queue apply --track ai_core --limit 100 --run --headless
 ```
 
-`headless` использует настоящий Chrome 156 с тем же UA/Client Hints, locale
-`ru-RU`, зоной `Asia/Krasnoyarsk` и экраном 1366×768, без `HeadlessChrome` в UA.
-Если HH показывает CAPTCHA до финальной отправки, запуск останавливается с сохранением очереди; после submit исход может быть `UNKNOWN`. Перед следующей попыткой сверять HH и не повторять тот же vacancy ID с неопределённым исходом. В visible-режиме при наличии интерактивного входа или `APPLYPILOT_INTERACTIVE=1` Chrome может ждать ручного решения CAPTCHA. Переключение headless/visible выполняется отдельным запуском и не превращает `UNKNOWN` в повторяемую заявку.
-
-Сессия сохраняется в:
-
-```text
-private/data/hh_session.json
-```
-
-Проверить доступные резюме без действий:
-
-```bash
-.venv/bin/python -m applypilot inspect --resumes
-```
-
-Проверить ограниченный список вакансий:
-
-```bash
-.venv/bin/python -m applypilot inspect \
-  --input private/data/snapshots/FILE.json \
-  --selected \
-  --limit 100 \
-  --preset ai-agents-llmops
-```
-
-`inspect` использует отдельный browser context и не вызывает `click`, `fill`, `submit` или page-evaluated JavaScript.
+Браузерные сессии хранятся вне Git, в локальной директории данных. Для диагностики доступно read-only `inspect --resumes`.
 
 ## Синхронизация откликов HH
 
@@ -544,10 +409,10 @@ private/data/hh_session.json
 
 ```bash
 .venv/bin/python -m applypilot apply \
-  --input private/data/snapshots/accepted-ai-core.json \
+  --input private/data/snapshots/FILE.json \
   --preset ai-agents-llmops \
   --dry-run \
-  --limit 100
+  --limit 20
 ```
 
 Dry-run не открывает браузер и не отправляет отклики, но создаёт auditable run и фиксирует выбранный список кандидатов.
@@ -556,7 +421,7 @@ Dry-run не открывает браузер и не отправляет от
 
 ```bash
 .venv/bin/python -m applypilot apply \
-  --input private/data/snapshots/accepted-ai-core.json \
+  --input private/data/snapshots/FILE.json \
   --preset ai-agents-llmops \
   --run \
   --limit 20 \
