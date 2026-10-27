@@ -1408,13 +1408,15 @@ def main(argv: list[str] | None = None) -> int:
 
     session_path = config.data_dir / "hh_session.json"
     if args.command == "login":
-        login(session_path, data_dir=config.data_dir, profile=config.load_profile())
+        with _hh_proxy() as proxy_url:
+            login(session_path, data_dir=config.data_dir, profile=config.load_profile(), proxy_url=proxy_url)
         print(f"saved: {session_path}")
         return 0
     if args.command == "session":
         from .session import check_session
-        result = check_session(session_path, data_dir=config.data_dir,
-                               profile=config.load_profile())
+        with _hh_proxy() as proxy_url:
+            result = check_session(session_path, data_dir=config.data_dir,
+                                   profile=config.load_profile(), proxy_url=proxy_url)
         print(f"session: {result.status} ({result.detail})")
         return 0 if result.status in {"confirmed", "valid-format"} else 1
     if args.command == "sources":
