@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from applypilot import browser
 from applypilot.browser import browser_settings, launch_context, real_user_agent
 from applypilot.cli import build_parser
 
@@ -43,6 +44,25 @@ def test_browser_defaults_keep_visible_real_chrome_and_hh_timezone():
     assert settings["locale"] == "ru-RU"
     assert settings["timezone"] == "Asia/Krasnoyarsk"
     assert settings["manual_captcha_timeout_seconds"] == 300
+
+
+def test_chrome_version_resolves_launcher_symlink_before_execution(tmp_path, monkeypatch):
+    executable = tmp_path / "Google Chrome.app" / "Contents" / "MacOS" / "Google Chrome"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("", encoding="utf-8")
+    launcher = tmp_path / "google-chrome"
+    launcher.symlink_to(executable)
+    monkeypatch.setattr(browser.shutil, "which", lambda name: str(launcher) if name == "google-chrome" else None)
+
+    assert browser._chrome_binary() == str(executable)
+
+
+def test_headless_user_agent_matches_macos_platform(monkeypatch):
+    monkeypatch.setattr(browser.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser, "chrome_version", lambda: "155.0.8059.85")
+
+    assert "Macintosh; Intel Mac OS X 10_15_7" in real_user_agent()
+    assert "X11; Linux" not in real_user_agent()
 
 
 def test_visible_mode_uses_the_real_window_without_ua_override(tmp_path):

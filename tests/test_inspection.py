@@ -1,4 +1,4 @@
-from applypilot.inspection import inspect_page
+from applypilot.inspection import _resume_titles, inspect_page
 
 
 class _Locator:
@@ -43,6 +43,34 @@ class _Page:
         raise AttributeError(name)
 
 
+class _ResumeLocator:
+    def __init__(self, values):
+        self.values = values
+
+    def all_inner_texts(self):
+        return self.values
+
+
+class _ResumePage:
+    def locator(self, selector):
+        values = {
+            "[data-qa='resume-title']": [
+                "Go-разработчик",
+                "Эксперт в области авиационных операций",
+            ],
+            "[data-qa*='resume-title']": [
+                "Go-разработчик",
+                "Эксперт в области авиационных операций",
+                "Мои резюме",
+            ],
+            "a[href*='/resume/']": [
+                "Go-разработчик\nОткрытое резюме",
+                "Эксперт в области авиационных операций\nСделать видимым",
+            ],
+        }
+        return _ResumeLocator(values[selector])
+
+
 def test_inspect_only_navigates_and_reads_dom():
     page = _Page()
     result = inspect_page(page, {"id": "42", "url": "https://hh.ru/vacancy/42"})
@@ -50,6 +78,15 @@ def test_inspect_only_navigates_and_reads_dom():
     assert result["id"] == "42"
     assert result["apply_button_visible"] is False
     assert result["unknown_conditions"] == ["response control was not found"]
+
+
+def test_resume_inspection_returns_only_resume_title_labels():
+    page = _ResumePage()
+
+    assert _resume_titles(page) == [
+        "Go-разработчик",
+        "Эксперт в области авиационных операций",
+    ]
 
 
 def test_regional_hh_redirect_is_not_marked_as_external_redirect():

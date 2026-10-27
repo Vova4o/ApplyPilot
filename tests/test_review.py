@@ -33,3 +33,19 @@ def test_review_separates_matches_provisional_and_rejected_rows(tmp_path):
     assert "Полное описание не загружено" in content
     assert "ranking=reject" in content
     assert "role:title_not_target" in content
+
+
+def test_review_uses_search_min_score_unless_top_level_override_exists(tmp_path):
+    item = {"id": "1", "name": "Go backend developer", "url": "https://hh.ru/vacancy/1",
+            "description": "Go backend", "score": 40}
+    profile = {"search": {"min_score": 50}}
+
+    output = write_review([item], profile, tmp_path / "nested-threshold.html")
+    content = output.read_text(encoding="utf-8")
+    assert "Подходящие: top (Selected): 0" in content
+    assert "Недостаточно данных (Provisional): 1" in content
+
+    output = write_review([item], {**profile, "min_score": 0},
+                          tmp_path / "top-level-override.html")
+    content = output.read_text(encoding="utf-8")
+    assert "Подходящие: top (Selected): 1" in content

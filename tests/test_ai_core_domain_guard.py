@@ -190,6 +190,7 @@ def test_explicit_ai_engineering_roles_pass_the_configured_title_gate() -> None:
 def test_ai_evaluation_title_can_pass_private_automatic_role_gate() -> None:
     search = {
         "queries": ["AI agents"], "only_remote": True,
+        "salary": {"from": 100000, "currency": "RUR"},
         "auto_apply_title_terms": ["agent", "llm", "rag", "mcp", "ai evaluation"],
     }
     raw = {

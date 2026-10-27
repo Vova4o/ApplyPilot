@@ -10,11 +10,14 @@ import random
 import sys
 import time
 import uuid
-from contextlib import ExitStack, redirect_stdout
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager, redirect_stdout
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+import requests
 
 from . import __version__, letters
 from .config import (
@@ -29,6 +32,7 @@ from .config import (
     validate_search,
 )
 from .cover_letters import letter_mode, load_letter_profile, render_template
+from .direct_network import direct_proxy
 from .llm import generate
 from .pacing import next_delay
 from .parser import (
@@ -61,6 +65,16 @@ from .templates import create_template, list_templates
 
 PRESET_CHOICES = tuple(ROLE_PRESETS)
 LOGGER = logging.getLogger(__name__)
+
+
+@contextmanager
+def _hh_proxy() -> Iterator[str | None]:
+    interface = os.getenv("APPLYPILOT_HH_INTERFACE", "").strip()
+    if interface:
+        with direct_proxy(interface) as proxy_url:
+            yield proxy_url
+    else:
+        yield None
 
 
 def _campaign_apply_summary(result: dict[str, Any]) -> dict[str, int | str]:
@@ -1370,9 +1384,13 @@ def main(argv: list[str] | None = None) -> int:
         print("playwright: lazy (install optional browser extra)")
         if args.online:
             try:
-                import requests
-                response = requests.get("https://hh.ru", timeout=10, headers={"User-Agent": "ApplyPilot/0.1"})
-                print(f"network: HTTP {response.status_code}")
+                with _hh_proxy() as proxy_url:
+                    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+                    with requests.Session() as session:
+                        if proxies:
+                            session.proxies.update(proxies)
+                        response = session.get("https://hh.ru", timeout=10, headers={"User-Agent": "ApplyPilot/0.1"})
+                        print(f"network: HTTP {response.status_code}")
             except requests.RequestException as exc:
                 print(f"network: error ({exc})")
         return 0
@@ -2881,11 +2899,13 @@ def main(argv: list[str] | None = None) -> int:
                           f"(max age {max_age_hours}h)", file=sys.stderr)
                     return 2
                 print(f"explicit apply run: {len(selected)} approved vacancy/vacancies; sync age <= {max_age_hours}h")
-                return _run_apply(
-                    selected_config, store, selected, run_id, account,
-                    input_path, args.limit, args.target_success,
-                    headless_override=(True if args.headless else (False if args.visible else None)),
-                )
+                with _hh_proxy() as proxy_url:
+                    return _run_apply(
+                        selected_config, store, selected, run_id, account,
+                        input_path, args.limit, args.target_success,
+                        headless_override=(True if args.headless else (False if args.visible else None)),
+                        proxy_url=proxy_url,
+                    )
         except (ConfigError, ValueError, OSError) as exc:
             print(f"queue: error ({str(exc)[:240]})", file=sys.stderr)
             return 2
@@ -3109,24 +3129,33 @@ def main(argv: list[str] | None = None) -> int:
                 ("publication_time", newest_budget),
                 ("relevance", request_budget - newest_budget),
             )
-        for order_by, allocated_budget in sort_budgets:
-            mode_remaining = allocated_budget
-            for spec in group_specs:
-                if mode_remaining <= 0:
-                    segments.append(ScanSegment(
-                        spec["queries"][0], spec["areas"][0], 0, "truncated", 0,
-                        "search request budget reached", order_by=order_by))
-                    break
-                group_items, group_segments = scan_many(
-                    spec["queries"], spec["areas"], spec["pages"], spec["remote"],
-                    date_from=spec["date_from"], start_page=page, pause_seconds=1.0,
-                    request_budget=mode_remaining, order_by=order_by,
-                )
-                mode_remaining -= sum(segment.requests for segment in group_segments)
-                for item in group_items:
-                    item["search_group"] = spec["name"]
-                all_items.extend(group_items)
-                segments.extend(group_segments)
+        with _hh_proxy() as proxy_url:
+            scan_session = requests.Session()
+            if proxy_url and hasattr(scan_session, "proxies"):
+                scan_session.proxies.update({"http": proxy_url, "https": proxy_url})
+            try:
+                for order_by, allocated_budget in sort_budgets:
+                    mode_remaining = allocated_budget
+                    for spec in group_specs:
+                        if mode_remaining <= 0:
+                            segments.append(ScanSegment(
+                                spec["queries"][0], spec["areas"][0], 0, "truncated", 0,
+                                "search request budget reached", order_by=order_by))
+                            break
+                        group_items, group_segments = scan_many(
+                            spec["queries"], spec["areas"], spec["pages"], spec["remote"],
+                            date_from=spec["date_from"], start_page=page, pause_seconds=1.0,
+                            request_budget=mode_remaining, order_by=order_by,
+                            session=scan_session,
+                        )
+                        mode_remaining -= sum(segment.requests for segment in group_segments)
+                        for item in group_items:
+                            item["search_group"] = spec["name"]
+                        all_items.extend(group_items)
+                        segments.extend(group_segments)
+            finally:
+                if hasattr(scan_session, "close"):
+                    scan_session.close()
         deduplicated: dict[str, dict] = {}
         for item in all_items:
             vacancy_id = str(item.get("id", ""))
@@ -3551,7 +3580,8 @@ def _run_apply(config: AppConfig, store: Store, selected: list[dict], run_id: st
                account: str, input_path: Path, requested_limit: int,
                target_success: int | None = None,
                headless_override: bool | None = None,
-               search_override: dict[str, Any] | None = None) -> int:
+               search_override: dict[str, Any] | None = None,
+               proxy_url: str | None = None) -> int:
     """Выполняет явно запрошенные браузерные отклики с аудируемыми условиями остановки."""
     try:
         profile = _profile(config, search_override or effective_search(config.load_search(), None))
@@ -3566,8 +3596,17 @@ def _run_apply(config: AppConfig, store: Store, selected: list[dict], run_id: st
     if _account(profile) != account:
         print("profile account changed after candidate selection; rerun dry-run", file=sys.stderr)
         return 2
+    from .browser import browser_settings
+
+    browser_options = browser_settings(profile)
+    if headless_override is not None:
+        browser_options["headless"] = headless_override
+    run_headless = bool(browser_options["headless"])
     state_path = config.data_dir / "hh_session.json"
-    session = check_session(state_path, data_dir=config.data_dir, profile=profile)
+    session = check_session(
+        state_path, data_dir=config.data_dir, profile=profile,
+        proxy_url=proxy_url, headless=run_headless,
+    )
     if session.status != "confirmed":
         print(f"session unavailable: {session.status} ({session.detail}); run `applypilot login` first",
               file=sys.stderr)
@@ -3604,10 +3643,6 @@ def _run_apply(config: AppConfig, store: Store, selected: list[dict], run_id: st
     long_pause_max = max(long_pause_min, float(timing.get("long_pause_max_seconds", long_pause_min)))
     pacing_rng = random.Random()
     confirmation_timeout = max(0.0, float(timing.get("confirmation_timeout_seconds", 15)))
-    browser_options = browser_settings(profile)
-    if headless_override is not None:
-        browser_options["headless"] = headless_override
-    run_headless = bool(browser_options["headless"])
     manual_captcha_timeout = float(browser_options["manual_captcha_timeout_seconds"])
     interactive_captcha = (
         not run_headless
@@ -3634,6 +3669,7 @@ def _run_apply(config: AppConfig, store: Store, selected: list[dict], run_id: st
                 state_path=state_path,
                 profile=profile,
                 headless=run_headless,
+                proxy_url=proxy_url,
             )
             context = browser_session.context
             page = context.new_page()
@@ -3654,7 +3690,7 @@ def _run_apply(config: AppConfig, store: Store, selected: list[dict], run_id: st
                     store.mark_run_item(run_id, vacancy_id, "skipped", reason)
                     print(f"{vacancy_id}: skipped — {reason}")
                     continue
-                approved_letter = str(item.get("approved_cover_letter") or "").strip()
+                approved_letter = str(item.get("approved_cover_letter") or item.get("cover_letter") or "").strip()
                 campaign_queue_item = bool(item.get("track"))
                 template_letter_available = (
                     campaign_queue_item and letter_mode_value == "template" and not approved_letter
@@ -3730,7 +3766,7 @@ def _run_apply(config: AppConfig, store: Store, selected: list[dict], run_id: st
                         )
                     try:
                         save_state(state_path, context.storage_state())
-                        sync_statuses(state_path, store, account=account)
+                        sync_statuses(state_path, store, account=account, proxy_url=proxy_url)
                         reconciled = store.reconcile_unknowns_from_negotiations(account)
                     except SyncError as exc:
                         LOGGER.warning("Could not confirm vacancy %s through sync: %s", item.get("id"), exc)

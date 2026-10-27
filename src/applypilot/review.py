@@ -11,8 +11,10 @@ from .scoring import evaluate_search_filter, filter_candidates, score_vacancy
 def write_review(items: list[dict[str, Any]], profile: dict[str, Any], output: Path,
                  top: int = 20) -> Path:
     top = max(0, top)
+    search_profile = profile.get("search", profile)
+    min_score = int(profile.get("min_score", search_profile.get("min_score", 0)))
     confirmed = filter_candidates(items, profile, max(len(items), top),
-                                  int(profile.get("min_score", 0)))
+                                  min_score)
     selected = confirmed[:top]
     additional = confirmed[top:]
     confirmed_ids = {item.id for item in confirmed}
@@ -22,7 +24,7 @@ def write_review(items: list[dict[str, Any]], profile: dict[str, Any], output: P
         if str(item.get("id", "")) in confirmed_ids:
             continue
         candidate = score_vacancy(item, profile)
-        decision = evaluate_search_filter(candidate.to_dict(), profile.get("search", profile))
+        decision = evaluate_search_filter(candidate.to_dict(), search_profile)
         target = rejected if candidate.decision == "reject" or decision.status == "reject" else provisional
         target.append((candidate, decision))
     provisional.sort(key=lambda row: (-row[0].score, row[0].id))
@@ -31,10 +33,10 @@ def write_review(items: list[dict[str, Any]], profile: dict[str, Any], output: P
     rows: list[str] = []
     sections = (
         ("Подходящие: top (Selected)",
-         [(candidate, evaluate_search_filter(candidate.to_dict(), profile.get("search", profile)))
+         [(candidate, evaluate_search_filter(candidate.to_dict(), search_profile))
           for candidate in selected]),
         ("Другие подтверждённые (Additional matches)",
-         [(candidate, evaluate_search_filter(candidate.to_dict(), profile.get("search", profile)))
+         [(candidate, evaluate_search_filter(candidate.to_dict(), search_profile))
           for candidate in additional]),
         ("Недостаточно данных (Provisional)", provisional),
         ("Отклонённые (Rejected)", rejected),

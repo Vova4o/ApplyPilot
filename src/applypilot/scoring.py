@@ -306,7 +306,11 @@ def score_vacancy(raw: dict[str, Any], profile: dict[str, Any]) -> Candidate:
         duties_component = min(15, len(set(medium)) * 2)
         experience_component = 8 if str(candidate.experience).lower() in {
             "noexperience", "between1and3", "нет опыта", "от 1 года до 3 лет"} else 0
-        salary_component = 10 if candidate.salary else 0
+        salary_preferences = search_rules.get("salary", {}) or {}
+        salary_preference_configured = bool(str(salary_preferences.get("currency", "")).strip()) or (
+            int(salary_preferences.get("from", 0) or 0) > 0
+        )
+        salary_component = 10 if candidate.salary and salary_preference_configured else 0
         format_component = 5 if candidate.is_remote else 0
         components = {"role": role_component, "stack": stack_component, "duties": duties_component,
                       "experience": experience_component, "salary": salary_component, "format": format_component}

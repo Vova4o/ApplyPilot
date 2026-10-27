@@ -71,6 +71,29 @@ def test_score_components_sum_to_bounded_score_and_go_has_word_boundary():
     assert "keyword:go" not in result.reasons
 
 
+def test_salary_does_not_change_score_without_salary_preference():
+    profile = {"search": {"salary": {"from": 0, "currency": "", "missing": "include"}}}
+    base = {"name": "Go Backend Engineer", "description": "Go gRPC backend"}
+
+    without_salary = score_vacancy({**base, "id": "1"}, profile)
+    with_salary = score_vacancy({**base, "id": "2", "salary": {"from": 180000, "currency": "RUR"}}, profile)
+
+    assert with_salary.score == without_salary.score
+    assert with_salary.components["salary"] == 0
+    assert with_salary.component_evidence["salary"] == ()
+
+
+def test_salary_component_remains_when_salary_preference_is_configured():
+    result = score_vacancy(
+        {"id": "1", "name": "Go Backend Engineer", "description": "Go gRPC backend",
+         "salary": {"from": 180000, "currency": "RUR"}},
+        {"search": {"salary": {"from": 150000, "currency": "RUR"}}},
+    )
+
+    assert result.components["salary"] == 10
+    assert result.component_evidence["salary"]
+
+
 def test_search_constraints_filter_salary_and_experience():
     search = {"salary": {"from": 180000, "currency": "RUR", "missing": "exclude"},
               "experience": {"allowed": ["between1And3"]}}

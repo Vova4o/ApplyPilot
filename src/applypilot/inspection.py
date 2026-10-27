@@ -106,13 +106,17 @@ def _resume_titles(page: Any) -> list[str]:
             values = page.locator(selector).all_inner_texts()
         except Exception:  # noqa: BLE001 — разметка HH различается между аккаунтами и версиями страниц
             values = []
-        titles.extend(value.strip() for value in values if value.strip())
+        found = [value.splitlines()[0].strip() for value in values if value.strip()]
+        if found:
+            titles = found
+            break
     return list(dict.fromkeys(titles))
 
 
 def inspect_resumes(state_path: Path, timeout_ms: int = 10_000,
                     *, data_dir: Path | None = None,
-                    profile: dict[str, Any] | None = None) -> dict[str, Any]:
+                    profile: dict[str, Any] | None = None,
+                    proxy_url: str | None = None) -> dict[str, Any]:
     """Проверяет сессию и доступные названия резюме HH в изолированном read-only контексте."""
     try:
         from playwright.sync_api import sync_playwright
@@ -125,7 +129,7 @@ def inspect_resumes(state_path: Path, timeout_ms: int = 10_000,
         with sync_playwright() as pw:
             browser_session = launch_context(
                 pw, data_dir=data_dir or state_path.parent, state_path=state_path,
-                profile=profile, headless=True,
+                profile=profile, headless=True, proxy_url=proxy_url,
             )
             context = browser_session.context
             page = context.new_page()
@@ -147,7 +151,8 @@ def inspect_resumes(state_path: Path, timeout_ms: int = 10_000,
 
 def inspect_items(state_path: Path, items: list[dict[str, Any]], limit: int = 3,
                   timeout_ms: int = 10_000, *, data_dir: Path | None = None,
-                  profile: dict[str, Any] | None = None) -> list[str]:
+                  profile: dict[str, Any] | None = None,
+                  proxy_url: str | None = None) -> list[str]:
     """Проверяет страницу резюме и заданные вакансии в приватном read-only контексте."""
     try:
         from playwright.sync_api import sync_playwright
@@ -161,7 +166,7 @@ def inspect_items(state_path: Path, items: list[dict[str, Any]], limit: int = 3,
         with sync_playwright() as pw:
             browser_session = launch_context(
                 pw, data_dir=data_dir or state_path.parent, state_path=state_path,
-                profile=profile, headless=True,
+                profile=profile, headless=True, proxy_url=proxy_url,
             )
             context = browser_session.context
             auth_page = context.new_page()

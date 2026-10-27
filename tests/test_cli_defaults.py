@@ -1,6 +1,46 @@
 """Mass AI queue defaults must not silently revert to pilot-sized batches."""
 
-from applypilot.cli import build_parser
+from contextlib import contextmanager
+from datetime import UTC, datetime
+
+from applypilot.cli import build_parser, main
+from applypilot.config import AppConfig
+
+
+def test_queue_apply_passes_direct_proxy_to_runner(tmp_path, monkeypatch):
+    config = AppConfig(tmp_path, tmp_path / "data", tmp_path / "profile.toml")
+    item = {"id": "1", "resume": "Go-разработчик"}
+    seen = {}
+
+    class StoreStub:
+        def __init__(self, _path):
+            pass
+
+        def latest_sync(self, _account):
+            return {"status": "ok", "created_at": datetime.now(UTC).isoformat()}
+
+    @contextmanager
+    def fake_proxy():
+        yield "http://127.0.0.1:12345"
+
+    def fake_run(*_args, **kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("applypilot.cli._config", lambda _args: config)
+    monkeypatch.setattr("applypilot.cli._track_config", lambda *_args, **_kwargs: (
+        config, {"resume": "Go-разработчик"},
+    ))
+    monkeypatch.setattr("applypilot.cli._profile", lambda *_args: {"account": "default"})
+    monkeypatch.setattr("applypilot.cli.Store", StoreStub)
+    monkeypatch.setattr("applypilot.cli._hh_proxy", fake_proxy)
+    monkeypatch.setattr("applypilot.cli._run_apply", fake_run)
+    monkeypatch.setattr("applypilot.campaigns.write_approved_input", lambda *_args, **_kwargs: (
+        tmp_path / "approved.json", [item],
+    ))
+
+    assert main(["queue", "apply", "--track", "default", "--run"]) == 0
+    assert seen["proxy_url"] == "http://127.0.0.1:12345"
 
 
 def test_go_defaults_to_all_sources_and_full_cycle() -> None:

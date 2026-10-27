@@ -212,6 +212,13 @@ CREATE TABLE IF NOT EXISTS telegram_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_telegram_messages_account
   ON telegram_messages(account, sent_at DESC);
+CREATE TABLE IF NOT EXISTS confirmed_republications (
+  account TEXT NOT NULL,
+  vacancy_id TEXT NOT NULL,
+  duplicate_of_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(account, vacancy_id)
+);
 """
 
 AUTO_APPROVAL_REASON = "FIT by private search criteria; full description and conditions verified"
@@ -232,6 +239,35 @@ def _vacancy_group_key(company: str, title: str) -> str:
     if not normalized or normalized == "|":
         return ""
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+
+
+def _normalize_role_match(text: str) -> str:
+    return re.sub(r"[^0-9a-zа-яё]+", " ", str(text or "").casefold()).strip()
+
+
+class RepublicationGuard:
+    def __init__(self, candidates: list[dict[str, Any]]) -> None:
+        self.candidates = candidates
+
+    def match(self, item: dict[str, Any]) -> str | None:
+        target_id = str(item.get("id", ""))
+        target_comp = _normalize_role_match(item.get("company", ""))
+        target_name = _normalize_role_match(item.get("name", ""))
+        target_desc = str(item.get("description") or "").strip()
+        for cand in self.candidates:
+            cand_id = str(cand.get("id", ""))
+            if cand_id == target_id:
+                continue
+            cand_comp = _normalize_role_match(cand.get("company", ""))
+            cand_name = _normalize_role_match(cand.get("name", ""))
+            cand_desc = str(cand.get("description") or "").strip()
+            if target_comp and cand_comp == target_comp and target_name and cand_name == target_name:
+                if target_desc and cand_desc:
+                    if target_desc == cand_desc or target_desc in cand_desc or cand_desc in target_desc:
+                        return cand_id
+                else:
+                    return cand_id
+        return None
 
 
 def canonical_channel_key(value: str) -> str:
@@ -834,6 +870,64 @@ class Store:
                     "AND (?='' OR track=?) AND status='APPROVED'",
                     (timestamp, account, vacancy_id, track, track),
                 )
+
+    def republication_guard(self, data_dir: Path, items: list[dict[str, Any]],
+                            account: str = "default") -> RepublicationGuard:
+        applied_ids = {vid for vid, st in self.statuses(account).items() if st in {"success", "already_applied"}}
+        candidates: list[dict[str, Any]] = []
+        history_path = data_dir / "reports" / "history.json"
+        if history_path.exists():
+            try:
+                data = json.loads(history_path.read_text(encoding="utf-8"))
+                history_items = data.get("selected") or data.get("items") or []
+                if isinstance(history_items, list):
+                    for h_item in history_items:
+                        if isinstance(h_item, dict) and str(h_item.get("id", "")) in applied_ids:
+                            candidates.append(h_item)
+            except (OSError, ValueError, json.JSONDecodeError):
+                pass
+        for item in items:
+            if (isinstance(item, dict) and str(item.get("id", "")) in applied_ids
+                    and str(item.get("id", "")) not in {str(c.get("id", "")) for c in candidates}):
+                candidates.append(item)
+        return RepublicationGuard(candidates)
+
+    def record_republication_duplicate(self, item: dict[str, Any], duplicate_of_id: str,
+                                       run_id: str = "", account: str = "default") -> str:
+        timestamp = now()
+        vacancy_id = str(item.get("id", ""))
+        note = f"republished duplicate of previously submitted vacancy {duplicate_of_id}"
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE run_items SET status=?, note=?, updated_at=? WHERE run_id=? AND vacancy_id=?",
+                ("duplicate_republication", note, timestamp, run_id, vacancy_id),
+            )
+            conn.execute(
+                "INSERT INTO events (account, vacancy_id, status, note, run_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (account, vacancy_id, "duplicate_republication", note, run_id, timestamp),
+            )
+            conn.execute(
+                "DELETE FROM reservations WHERE account=? AND vacancy_id=?",
+                (account, vacancy_id),
+            )
+        return note
+
+    def annotate_confirmed_republication(self, vacancy_id: str, duplicate_of_id: str,
+                                         account: str = "default") -> bool:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO confirmed_republications (account, vacancy_id, duplicate_of_id, created_at) VALUES (?, ?, ?, ?)",
+                (account, str(vacancy_id), str(duplicate_of_id), now()),
+            )
+            return cur.rowcount > 0
+
+    def confirmed_republication_ids(self, account: str = "default") -> set[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT vacancy_id FROM confirmed_republications WHERE account=?",
+                (account,),
+            ).fetchall()
+            return {str(r["vacancy_id"]) for r in rows}
 
     def reserve(self, item: dict[str, Any], run_id: str, per_run: int, per_day: int,
                 account: str = "default") -> tuple[bool, str]:

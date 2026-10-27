@@ -132,6 +132,55 @@ def test_apply_inserts_required_template_letter_without_llm(tmp_path, monkeypatc
     assert store.statuses("account")["1"] == "success"
 
 
+def test_apply_uses_explicit_letter_when_profile_mode_is_off(tmp_path, monkeypatch):
+    class Context:
+        def new_page(self): return object()
+        def storage_state(self): return {"cookies": []}
+        def close(self): pass
+
+    class Browser:
+        def new_context(self, **kwargs): return Context()
+        def close(self): pass
+
+    class Playwright:
+        def start(self): return self
+        @property
+        def chromium(self): return self
+        def launch(self, **kwargs): return Browser()
+        def stop(self): pass
+
+    profile = {"reviewed": True, "account": "account", "llm": {"enabled": False},
+               "cover_letter": {"mode": "off"},
+               "apply": {"delay_min_seconds": 0, "delay_max_seconds": 0}}
+    config = AppConfig(tmp_path, tmp_path / "data", tmp_path / "profile.toml")
+    store = Store(config.db_path)
+    received = []
+    session_options = []
+    monkeypatch.setattr("applypilot.cli._profile", lambda *args: profile)
+    def check_session(_path, **kwargs):
+        session_options.append(kwargs)
+        return SessionCheck("confirmed", "ok")
+
+    monkeypatch.setattr("applypilot.cli.check_session", check_session)
+    monkeypatch.setattr("applypilot.cli.save_state", lambda *args: None)
+    monkeypatch.setattr("applypilot.cli.generate", lambda *a, **kw: pytest.fail("LLM called"))
+    monkeypatch.setattr("playwright.sync_api.sync_playwright", Playwright)
+
+    def apply(_page, item, resume, cover_letter, **kwargs):
+        received.append((resume, cover_letter))
+        return type("Result", (), {"status": "success", "note": "confirmed"})()
+
+    monkeypatch.setattr("applypilot.autoapply.apply_one", apply)
+    item = {"id": "1", "name": "Go", "url": "https://hh.ru/vacancy/1", "resume": "Go Backend",
+            "cover_letter_required": True, "cover_letter": "Письмо для этой вакансии"}
+
+    assert _run_apply(config, store, [item], "run", "account", tmp_path / "snapshot.json", 1,
+                      headless_override=False) == 0
+    assert received == [("Go Backend", "Письмо для этой вакансии")]
+    assert session_options[0]["headless"] is False
+    assert store.statuses("account")["1"] == "success"
+
+
 def test_dry_run_does_not_prepare_letters_or_read_missing_resume(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     profile = tmp_path / "profile.toml"

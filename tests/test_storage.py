@@ -1,9 +1,17 @@
 import csv
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from applypilot.analytics import report
 from applypilot.storage import Store
+
+OZON_CORE_DESCRIPTION = (
+    "Команда разработки ядра отвечает за открытие и учет банковских счетов. "
+    "CORE.Reports формирует регуляторную и финансовую отчетность. "
+    "Основной стек: Golang, PostgreSQL, ClickHouse, Docker, Kubernetes, CI/CD."
+)
 
 
 def test_legacy_import_is_idempotent(tmp_path):
@@ -46,6 +54,92 @@ def test_reservation_uses_one_budget_unit_and_deduplicates(tmp_path):
     assert not store.reserve({"id": "2", "name": "B"}, "run", per_run=1, per_day=5)[0]
     store.record(item, "success", run_id="run")
     assert store.statuses()["1"] == "success"
+
+
+def test_republication_guard_matches_ozon_repost_without_blocking_another_role(tmp_path):
+    data_dir = tmp_path / "data"
+    reports = data_dir / "reports"
+    reports.mkdir(parents=True)
+    old = {
+        "id": "136786962",
+        "name": "Разработчик Go, Отдел разработки ядра, отчеты, Ozon Bank",
+        "company": "Ozon Банк",
+        "description": OZON_CORE_DESCRIPTION,
+    }
+    repost = {
+        "id": "138014997",
+        "name": "  Разработчик Go, Отдел разработки ядра, отчеты, Ozon Bank ",
+        "company": "OZON БАНК",
+        "description": f"  {OZON_CORE_DESCRIPTION}\n",
+    }
+    reports.joinpath("history.json").write_text(
+        json.dumps({"selected": [old, repost]}, ensure_ascii=False), encoding="utf-8",
+    )
+    store = Store(data_dir / "state.sqlite3")
+    store.record(old, "success", "confirmed by HH page", account="hh-primary")
+
+    guard = store.republication_guard(data_dir, [repost], "hh-primary")
+
+    assert guard.match(repost) == "136786962"
+    assert guard.match({**repost, "id": "different", "name": "Другой Go-продукт"}) is None
+
+
+def test_republication_journal_does_not_rewrite_success_or_create_attempt(tmp_path):
+    data_dir = tmp_path / "data"
+    reports = data_dir / "reports"
+    reports.mkdir(parents=True)
+    old = {
+        "id": "136786962",
+        "name": "Разработчик Go, Отдел разработки ядра, отчеты, Ozon Bank",
+        "company": "Ozon Банк",
+        "description": OZON_CORE_DESCRIPTION,
+    }
+    repost = {**old, "id": "138014997"}
+    reports.joinpath("history.json").write_text(
+        json.dumps({"items": [old, repost]}, ensure_ascii=False), encoding="utf-8",
+    )
+    store = Store(data_dir / "state.sqlite3")
+    store.record(old, "success", "confirmed", account="hh-primary")
+    store.start_run("run", "hh-primary", "apply", data_dir / "input.json", 1, [repost])
+
+    note = store.record_republication_duplicate(repost, old["id"], "run", "hh-primary")
+    store.finish_run("run", "completed")
+
+    assert note == "republished duplicate of previously submitted vacancy 136786962"
+    assert store.statuses("hh-primary") == {"136786962": "success"}
+    assert store.run_summary("run")["counts"] == {"duplicate_republication": 1}
+    with store.connect() as conn:
+        event = conn.execute(
+            "SELECT status,note FROM events WHERE vacancy_id=?", ("138014997",)
+        ).fetchone()
+    assert tuple(event) == ("duplicate_republication", note)
+
+
+def test_confirmed_republication_annotation_preserves_success_and_corrects_report(tmp_path):
+    store = Store(tmp_path / "state.sqlite3")
+    old = {"id": "136786962", "name": "Ozon core", "company": "Ozon Банк"}
+    repost = {"id": "138014997", "name": "Ozon core", "company": "Ozon Банк"}
+    store.record(old, "success", "confirmed", account="hh-primary")
+    store.record(repost, "success", "confirmed", account="hh-primary")
+
+    assert store.annotate_confirmed_republication(
+        "138014997", "136786962", "hh-primary",
+    ) is True
+    assert store.annotate_confirmed_republication(
+        "138014997", "136786962", "hh-primary",
+    ) is False
+
+    assert store.statuses("hh-primary") == {
+        "136786962": "success",
+        "138014997": "success",
+    }
+    assert store.confirmed_republication_ids("hh-primary") == {"138014997"}
+    analytics = report(store, "hh-primary")
+    assert "Recorded application vacancy IDs: 2" in analytics
+    assert "Confirmed republished duplicates: 1" in analytics
+    assert "Unique application vacancies after republication audit: 1" in analytics
+    assert "Confirmed application vacancy IDs: 2" in analytics
+    assert "Unique confirmed applications after republication audit: 1" in analytics
 
 
 def test_manual_outcome_releases_transient_reservation_for_a_future_run(tmp_path):

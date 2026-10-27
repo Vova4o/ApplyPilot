@@ -67,7 +67,8 @@ def save_state(path: Path, data: dict) -> None:
             os.unlink(temp_name)
 
 
-def login(path: Path, *, data_dir: Path | None = None, profile: dict | None = None) -> None:
+def login(path: Path, *, data_dir: Path | None = None, profile: dict | None = None,
+          proxy_url: str | None = None) -> None:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -82,6 +83,7 @@ def login(path: Path, *, data_dir: Path | None = None, profile: dict | None = No
             state_path=path,
             profile=profile,
             headless=False,
+            proxy_url=proxy_url,
         )
         try:
             page = session.context.new_page()
@@ -93,7 +95,8 @@ def login(path: Path, *, data_dir: Path | None = None, profile: dict | None = No
 
 
 def check_session(path: Path, *, data_dir: Path | None = None,
-                  profile: dict | None = None) -> SessionCheck:
+                  profile: dict | None = None, proxy_url: str | None = None,
+                  headless: bool = True) -> SessionCheck:
     """Проверяет реальную HH-сессию в том же persistent Chrome-профиле, что и apply."""
     try:
         from playwright.sync_api import sync_playwright
@@ -115,7 +118,8 @@ def check_session(path: Path, *, data_dir: Path | None = None,
                 data_dir=data_dir or path.parent,
                 state_path=path,
                 profile=profile,
-                headless=True,
+                headless=headless,
+                proxy_url=proxy_url,
             )
             page = session.context.new_page()
             page.goto("https://hh.ru/applicant/resumes", wait_until="domcontentloaded", timeout=45000)

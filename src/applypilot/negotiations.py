@@ -80,13 +80,16 @@ def _parse_topics(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def sync_statuses(state_path: Path, store: Store, account: str = "default",
-                  max_pages: int | None = None, timeout: float = 20.0) -> list[dict[str, Any]]:
-    """Читает только статусы откликов; сообщения и chat-endpoints не используются."""
+                  max_pages: int | None = None, timeout: float = 20.0,
+                  proxy_url: str | None = None) -> list[dict[str, Any]]:
+    """Read negotiation statuses only; messages and chat endpoints are excluded."""
     client: requests.Session | None = None
     try:
         if max_pages is not None and max_pages < 1:
             raise SyncError("max_pages must be positive")
         client = requests.Session()
+        if proxy_url is not None:
+            client.proxies.update({"http": proxy_url, "https": proxy_url})
         for cookie in _cookies(state_path):
             client.cookies.set(cookie["name"], cookie["value"], domain=cookie.get("domain", ".hh.ru"),
                               path=cookie.get("path", "/"))
