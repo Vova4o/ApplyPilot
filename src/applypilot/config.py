@@ -256,7 +256,7 @@ def effective_search(raw: dict[str, Any], preset_name: str | None = None,
     requested = preset_name or raw.get("preset")
     if requested and requested not in ROLE_PRESETS:
         raise ConfigError(f"unknown preset: {requested}")
-    resolved = resolve_search(raw, requested)
+    resolved = resolve_search(raw, preset_name)
     if "request_budget" not in resolved and "max_queries" in resolved:
         resolved["request_budget"] = resolved["max_queries"]
     values = dict(DEFAULT_SEARCH)

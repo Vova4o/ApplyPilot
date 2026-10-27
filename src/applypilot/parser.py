@@ -14,6 +14,8 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from .browser import real_user_agent
+
 
 @dataclass(frozen=True)
 class ScanResult:
@@ -283,8 +285,13 @@ def _get_hh(client: requests.Session, url: str, *, params: dict[str, Any] | None
     for _ in range(max_redirects + 1):
         if budget is not None:
             budget.consume()
+        headers = {
+            "User-Agent": real_user_agent(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
         response = client.get(current_url, params=current_params, timeout=timeout,
-                              headers={"User-Agent": "ApplyPilot/0.1"}, allow_redirects=False)
+                              headers=headers, allow_redirects=False)
         current_params = None
         if response.status_code not in {301, 302, 303, 307, 308}:
             return response, ""

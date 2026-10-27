@@ -1155,7 +1155,12 @@ def refresh_queue(config: AppConfig, track: str, profile: dict[str, Any],
     errors = []
     if persist and selected:
         if source == "hh.ru":
-            enriched, errors = enrich_items(selected, len(selected), pause_seconds=1.0)
+            from .cli import _hh_proxy
+
+            with _hh_proxy() as proxy_url, requests.Session() as proxy_session:
+                if proxy_url:
+                    proxy_session.proxies = {"http": proxy_url, "https": proxy_url}
+                enriched, errors = enrich_items(selected, len(selected), session=proxy_session, pause_seconds=0.5)
             updates = {row["id"]: row for row in enriched}
         else:
             provider = default_registry().get(source)

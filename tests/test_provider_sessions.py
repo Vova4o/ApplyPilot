@@ -479,3 +479,14 @@ def test_yandex_unproven_profile_remains_unknown(tmp_path: Path) -> None:
     manager, _context, _ = manager_with_context(tmp_path, page)
     write_state(manager, source="yandex")
     assert manager.check("yandex.ru/jobs")["status"] == SessionStatus.UNKNOWN.value
+
+
+@pytest.mark.parametrize("proved", [True, False])
+def test_manual_login_checks_hidden_habr_account_controls(tmp_path, proved):
+    page = FakePage("https://career.habr.com/", "Job catalogue")
+    page.evaluate = lambda script: proved and script == provider_sessions.HABR_ACCOUNT_DOM_PROOF
+    manager, context, _ = manager_with_context(tmp_path, page)
+    result = manager.login("habr", wait_seconds=0, interactive=False)
+    assert result["status"] == ("saved" if proved else "unknown")
+    assert manager.storage_state_path("habr").exists() is proved
+    assert context.closed

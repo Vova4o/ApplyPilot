@@ -761,6 +761,15 @@ class ProviderSessionManager:
                             status, _detail = classify_provider_page(
                                 config, getattr(page, "url", config.login_url), body,
                             )
+                            if (status == SessionStatus.UNKNOWN and config.source == "habr"
+                                    and urlparse(str(page.url)).hostname == "career.habr.com"):
+                                evaluate = getattr(page, "evaluate", None)
+                                if callable(evaluate):
+                                    try:
+                                        if evaluate(HABR_ACCOUNT_DOM_PROOF):
+                                            status = SessionStatus.CONFIRMED
+                                    except Exception:
+                                        LOGGER.debug("Habr login DOM proof unavailable", exc_info=True)
                             if status == SessionStatus.CONFIRMED:
                                 break
                             if time.monotonic() >= deadline:
