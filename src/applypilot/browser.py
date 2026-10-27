@@ -34,6 +34,42 @@ _CHROME_CANDIDATES = (
 )
 _UA_RE = re.compile(r"Chrome/(\d+)\.")
 
+STEALTH_INIT_SCRIPT = """
+(() => {
+    try {
+        if (Object.defineProperty) {
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+        }
+        if (!window.chrome) {
+            window.chrome = {};
+        }
+        if (!window.chrome.runtime) {
+            window.chrome.runtime = {
+                PlatformOs: { MAC: 'mac', WIN: 'win', ANDROID: 'android', CROS: 'cros', LINUX: 'linux', OPENBSD: 'openbsd' },
+                PlatformArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64', MIPS: 'mips', MIPS64: 'mips64' },
+                PlatformNaclArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64', MIPS: 'mips', MIPS64: 'mips64' },
+                RequestUpdateCheckStatus: { THROTTLED: 'throttled', NO_UPDATE: 'no_update', UPDATE_AVAILABLE: 'update_available' },
+                OnInstalledReason: { INSTALL: 'install', UPDATE: 'update', CHROME_UPDATE: 'chrome_update', SHARED_MODULE_UPDATE: 'shared_module_update' },
+                OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+            };
+        }
+        if (navigator.permissions && navigator.permissions.query) {
+            const originalQuery = navigator.permissions.query.bind(navigator.permissions);
+            navigator.permissions.query = (parameters) => {
+                if (parameters && parameters.name === 'notifications') {
+                    return Promise.resolve({
+                        state: typeof Notification !== 'undefined' ? Notification.permission : 'default',
+                        onchange: null,
+                    });
+                }
+                return originalQuery(parameters);
+            };
+        }
+    } catch (_) {}
+})();
+"""
+
 
 def _chrome_binary() -> str | None:
     explicit = os.getenv("APPLYPILOT_CHROME_EXECUTABLE", "").strip()
@@ -228,6 +264,8 @@ def launch_context(
         f"--window-size={DEFAULT_WINDOW['width']},{DEFAULT_WINDOW['height']}",
     ]
     headless_mode = bool(settings["headless"])
+    if headless_mode:
+        args.append("--headless=new")
     kwargs = {
         "headless": headless_mode,
         "ignore_default_args": ["--enable-automation"],
@@ -260,6 +298,11 @@ def launch_context(
                 raise
             LOGGER.warning("Chrome channel %r is unavailable; falling back to Playwright Chromium", channel)
             context = chromium.launch_persistent_context(str(profile_dir), **kwargs)
+        if hasattr(context, "add_init_script"):
+            try:
+                context.add_init_script(STEALTH_INIT_SCRIPT)
+            except Exception:
+                LOGGER.debug("Could not add stealth init script to persistent context", exc_info=True)
         if (state_path is not None and state_path.exists() and not _looks_seeded(profile_dir)
                 and _import_storage_state(context, state_path)):
             (profile_dir / ".applypilot_seeded").write_text("1", encoding="utf-8")
@@ -279,4 +322,9 @@ def launch_context(
     if state_path is not None and state_path.exists():
         context_kwargs["storage_state"] = str(state_path)
     context = browser.new_context(**context_kwargs)
+    if hasattr(context, "add_init_script"):
+        try:
+            context.add_init_script(STEALTH_INIT_SCRIPT)
+        except Exception:
+            LOGGER.debug("Could not add stealth init script to fallback context", exc_info=True)
     return BrowserSession(context=context, browser=browser, persistent=False, profile_dir=profile_dir)

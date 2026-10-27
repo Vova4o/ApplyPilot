@@ -1381,7 +1381,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"root: {config.root}")
         print(f"data: {config.data_dir}")
         print(f"profile: {'present' if config.profile_path.exists() else 'missing'}")
-        print("playwright: lazy (install optional browser extra)")
+        try:
+            import playwright.sync_api
+
+            print("playwright: installed")
+        except ImportError:
+            print("playwright: lazy (install optional browser extra)")
         if args.online:
             try:
                 with _hh_proxy() as proxy_url:

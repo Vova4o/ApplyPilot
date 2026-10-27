@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-from .browser import DEFAULT_WINDOW, real_user_agent
+from .browser import DEFAULT_WINDOW, STEALTH_INIT_SCRIPT, real_user_agent
 from .session import classify_session_page
 
 try:  # pragma: no cover - the supported host is Linux
@@ -499,6 +499,8 @@ def _launch_kwargs(headless: bool) -> dict[str, Any]:
         "--disable-blink-features=AutomationControlled",
         f"--window-size={DEFAULT_WINDOW['width']},{DEFAULT_WINDOW['height']}",
     ]
+    if headless:
+        args.append("--headless=new")
     kwargs: dict[str, Any] = {
         "headless": headless,
         "ignore_default_args": ["--enable-automation"],
@@ -529,12 +531,18 @@ def _default_context_factory(playwright: Any, profile_dir: Path, headless: bool)
     kwargs = _launch_kwargs(headless)
     chromium = playwright.chromium
     try:
-        return chromium.launch_persistent_context(str(profile_dir), channel="chrome", **kwargs)
+        context = chromium.launch_persistent_context(str(profile_dir), channel="chrome", **kwargs)
     except Exception as exc:
         if not _channel_unavailable(exc) or _looks_like_profile_lock(exc):
             raise
         LOGGER.warning("Chrome channel unavailable; using Playwright Chromium")
-        return chromium.launch_persistent_context(str(profile_dir), **kwargs)
+        context = chromium.launch_persistent_context(str(profile_dir), **kwargs)
+    if hasattr(context, "add_init_script"):
+        try:
+            context.add_init_script(STEALTH_INIT_SCRIPT)
+        except Exception:
+            LOGGER.debug("Could not add stealth init script to provider context", exc_info=True)
+    return context
 
 
 def _close_context(context: Any) -> None:

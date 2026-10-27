@@ -8,6 +8,12 @@ from applypilot.cli import build_parser
 
 
 class _Context:
+    def __init__(self):
+        self.init_scripts = []
+
+    def add_init_script(self, script):
+        self.init_scripts.append(script)
+
     def close(self):
         pass
 
@@ -79,12 +85,25 @@ def test_headless_mode_keeps_chrome_identity_and_desktop_dimensions(tmp_path):
     kwargs = _launch(tmp_path, headless=True)
 
     assert kwargs["headless"] is True
+    assert "--headless=new" in kwargs["args"]
     assert "HeadlessChrome" not in kwargs["user_agent"]
     assert kwargs["user_agent"] == real_user_agent()
     assert kwargs["viewport"] == {"width": 1366, "height": 768}
     assert kwargs["screen"] == {"width": 1366, "height": 768}
     assert kwargs["timezone_id"] == "Asia/Krasnoyarsk"
     assert "no_viewport" not in kwargs
+
+
+def test_launch_context_adds_stealth_init_script(tmp_path):
+    playwright = _Playwright()
+    session = launch_context(
+        playwright,
+        data_dir=tmp_path,
+        profile={"browser": {"headless": True}},
+    )
+    assert len(session.context.init_scripts) == 1
+    assert "webdriver" in session.context.init_scripts[0]
+    session.close()
 
 
 def test_cli_exposes_explicit_visible_and_headless_modes():
