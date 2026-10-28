@@ -2294,9 +2294,9 @@ def main(argv: list[str] | None = None) -> int:
                         stops["hh.ru"] = f"sync blocked: {detail}"
                     else:
                         try:
-                            with store.run_lock():
+                            with store.run_lock(), _hh_proxy() as proxy_url:
                                 store.recover_interrupted_runs(_account(profile))
-                                sync_statuses(session_path, store, account=_account(profile))
+                                sync_statuses(session_path, store, account=_account(profile), proxy_url=proxy_url)
                                 store.reconcile_unknowns_from_negotiations(_account(profile))
                             hh_sync_ok = bool((store.latest_sync(_account(profile)) or {}).get("status") == "ok")
                             if not hh_sync_ok:
