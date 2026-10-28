@@ -32,7 +32,7 @@ from .config import (
     validate_search,
 )
 from .cover_letters import letter_mode, load_letter_profile, render_template
-from .direct_network import direct_proxy
+from .direct_network import direct_proxy, hh_proxy
 from .llm import generate
 from .pacing import next_delay
 from .parser import (

@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import requests
+
 from .config import AppConfig, search_groups, validate_search
 from .parser import ScanSegment, enrich_items, save_snapshot, stamp_first_seen
 from .scoring import (
@@ -243,7 +245,16 @@ def run_campaign(config: AppConfig, track: str, profile: dict[str, Any], search:
     all_items: list[dict[str, Any]] = []
     segments: list[ScanSegment] = []
     detail_errors: list[str] = []
+    scan_session = None
+    proxy_cm = None
     try:
+        from .cli import _hh_proxy
+
+        proxy_cm = _hh_proxy()
+        proxy_url = proxy_cm.__enter__()
+        scan_session = requests.Session()
+        if proxy_url:
+            scan_session.proxies = {"http": proxy_url, "https": proxy_url}
         request_budget_value = effective_budget
         if sort_mode == "relevance":
             sort_budgets = (("relevance", request_budget_value),)
@@ -287,6 +298,7 @@ def run_campaign(config: AppConfig, track: str, profile: dict[str, Any], search:
                     "date_from": spec["date_from"], "pause_seconds": 1.0,
                     "request_budget": remaining, "order_by": order_by,
                     "start_pages": start_pages or {},
+                    "session": scan_session,
                 })
                 remaining -= sum(segment.requests for segment in group_segments)
                 for item in group_items:
@@ -337,7 +349,7 @@ def run_campaign(config: AppConfig, track: str, profile: dict[str, Any], search:
         for item in needs_full_description:
             if str(item.get("id") or "") not in candidate_ids:
                 item["description_status"] = "provisional"
-        enriched, detail_errors = enrich_items(enrichment_items, details, pause_seconds=1.0)
+        enriched, detail_errors = enrich_items(enrichment_items, details, session=scan_session, pause_seconds=1.0)
         enriched_by_id = {str(item.get("id") or ""): item for item in enriched}
         for item in all_items:
             fresh = enriched_by_id.get(str(item.get("id") or ""))
@@ -446,6 +458,11 @@ def run_campaign(config: AppConfig, track: str, profile: dict[str, Any], search:
     except BaseException as exc:
         store.fail_campaign(campaign_id, f"{type(exc).__name__}: {exc}")
         raise
+    finally:
+        if scan_session is not None:
+            scan_session.close()
+        if proxy_cm is not None:
+            proxy_cm.__exit__(None, None, None)
 
 
 def write_approved_input(config: AppConfig, track: str, account: str,

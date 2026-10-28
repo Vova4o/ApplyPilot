@@ -520,7 +520,17 @@ def scan_source(config: AppConfig, track: str, profile: dict[str, Any], search: 
                 # Keep state_path on the independent sitemap cursor so the
                 # two discovery channels cannot advance or suppress each other.
         scan_session = None
-        if not fixture_mode and source in {"career.habr.com", "getmatch.ru", "geekjob.ru"}:
+        proxy_cm = None
+        if not fixture_mode and source == "hh.ru":
+            from .cli import _hh_proxy
+
+            proxy_cm = _hh_proxy()
+            proxy_url = proxy_cm.__enter__()
+            scan_session = requests.Session()
+            if proxy_url:
+                scan_session.proxies = {"http": proxy_url, "https": proxy_url}
+            filters["session"] = scan_session
+        elif not fixture_mode and source in {"career.habr.com", "getmatch.ru", "geekjob.ru"}:
             # A provider pass can make hundreds of list/detail GETs. Reuse its
             # connection pool instead of paying a new TCP/TLS setup per URL.
             scan_session = requests.Session()
@@ -536,6 +546,8 @@ def scan_source(config: AppConfig, track: str, profile: dict[str, Any], search: 
         finally:
             if scan_session is not None:
                 scan_session.close()
+            if proxy_cm is not None:
+                proxy_cm.__exit__(None, None, None)
         if hasattr(discovered, "items"):
             raw_items = list(discovered.items)
             segments = list(discovered.segments)

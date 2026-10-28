@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import http.server
+import os
 import platform
 import select
 import socket
@@ -246,3 +247,15 @@ def direct_proxy(interface_name: str | None, *, _dialer: _Dialer | None = None) 
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+@contextlib.contextmanager
+def hh_proxy() -> Iterator[str | None]:
+    """Run an ephemeral loopback proxy bound to APPLYPILOT_HH_INTERFACE if configured."""
+    interface = os.getenv("APPLYPILOT_HH_INTERFACE", "").strip()
+    if interface:
+        with direct_proxy(interface) as proxy_url:
+            yield proxy_url
+    else:
+        yield None
+
