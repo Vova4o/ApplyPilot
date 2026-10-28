@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -88,8 +90,27 @@ def login(path: Path, *, data_dir: Path | None = None, profile: dict | None = No
         try:
             page = session.context.new_page()
             page.goto("https://hh.ru/account/login", wait_until="domcontentloaded", timeout=60000)
-            input("Log in in the Chrome window, then press Enter here: ")
+            print("Chrome window opened via en0. Log in to HH in the browser window.", flush=True)
+            print("Waiting for login (auto-detects once you reach your account, or press Enter)...", flush=True)
+            import select
+            deadline = time.monotonic() + 300
+            while time.monotonic() < deadline:
+                if sys.stdin.isatty():
+                    r, _, _ = select.select([sys.stdin], [], [], 0.1)
+                    if r:
+                        sys.stdin.readline()
+                        break
+                time.sleep(1.5)
+                try:
+                    url = page.url
+                    if "/applicant/" in url and "/account/login" not in url:
+                        print(f"Login detected: {url}", flush=True)
+                        time.sleep(2)
+                        break
+                except Exception:  # noqa: BLE001 — browser closed by user or navigation cancelled
+                    break
             save_state(path, session.context.storage_state())
+            print("Session saved successfully to", path, flush=True)
         finally:
             session.close()
 

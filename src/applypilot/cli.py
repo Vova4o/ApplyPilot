@@ -2397,12 +2397,14 @@ def main(argv: list[str] | None = None) -> int:
                                 continue
                             run_id = uuid.uuid4().hex
                             store.execution_run(args.execution_id, run_id, source, args.track)
-                            code = _run_apply(
-                                selected_config, store, prepared, run_id, account,
-                                input_path, args.limit, search_override=search,
-                                headless_override=(True if args.headless else
-                                                   (False if args.visible else None)),
-                            )
+                            with _hh_proxy() as proxy_url:
+                                code = _run_apply(
+                                    selected_config, store, prepared, run_id, account,
+                                    input_path, args.limit, search_override=search,
+                                    headless_override=(True if args.headless else
+                                                       (False if args.visible else None)),
+                                    proxy_url=proxy_url,
+                                )
                             live[source] = {
                                 "exit_code": code, "run_id": run_id,
                                 "summary": store.run_summary(run_id),
