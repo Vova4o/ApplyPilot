@@ -228,9 +228,17 @@ def apply_habr_page(
 
         clicked = True
         submit.first.click(timeout=12_000)
-        page.wait_for_timeout(1000)
-        after_text = page.locator("body").inner_text(timeout=7000)
-        confirmed_notice = "отклик отправлен" in after_text.casefold()
+        confirmed_notice = False
+        for _ in range(10):
+            page.wait_for_timeout(500)
+            if 200 in responses:
+                after_text = page.locator("body").inner_text(timeout=2000)
+                if "отклик отправлен" in after_text.casefold():
+                    confirmed_notice = True
+                    break
+        if not confirmed_notice:
+            after_text = page.locator("body").inner_text(timeout=2000)
+            confirmed_notice = "отклик отправлен" in after_text.casefold()
 
         if not (200 in responses and confirmed_notice):
             if not writes and not responses:
