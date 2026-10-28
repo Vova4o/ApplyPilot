@@ -258,6 +258,12 @@ def _select_resume(page, dialog, resume: str) -> str:
             LOGGER.debug("Could not inspect a resume option", exc_info=True)
     if len(exact) == 1:
         exact[0].click(timeout=8000)
+        try:
+            drop = page.locator("[data-qa='drop-base']")
+            if drop.count() > 0 and drop.first.is_visible(timeout=500):
+                page.keyboard.press("Escape")
+        except Exception:  # noqa: BLE001, S110 — closing a non-existent dropdown must not fail application flow
+            pass
         return ""
     if len(exact) > 1:
         return "resume selection is ambiguous: duplicate exact titles"
@@ -489,6 +495,13 @@ def apply_one(page, item: dict, resume: str, cover_letter: str = "", dry_run: bo
         page.wait_for_timeout(random.randint(1200, 2800))
         if not submit.is_enabled(timeout=2000):
             return ApplyResult("needs_manual", "HH confirmation button became disabled")
+        try:
+            drop = page.locator("[data-qa='drop-base']")
+            if drop.count() > 0 and drop.first.is_visible(timeout=500):
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
+        except Exception:  # noqa: BLE001, S110 — closing a non-existent dropdown must not fail application flow
+            pass
         try:
             submit.click(timeout=15000)
         except Exception as exc:  # noqa: BLE001 — клик мог уйти; повторять нельзя

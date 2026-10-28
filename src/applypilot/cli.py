@@ -3827,7 +3827,7 @@ def _run_apply(config: AppConfig, store: Store, selected: list[dict], run_id: st
             if confirmed_successes and any(item.get("track") for item in selected):
                 try:
                     save_state(state_path, context.storage_state())
-                    synced = sync_statuses(state_path, store, account=account)
+                    synced = sync_statuses(state_path, store, account=account, proxy_url=proxy_url)
                     selected_ids = {str(item.get("id") or "") for item in selected}
                     negotiation_ids = {
                         str(row.get("vacancy_id") or row.get("id") or "") for row in synced

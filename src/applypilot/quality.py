@@ -103,6 +103,11 @@ def _metrics(rows: list[dict[str, Any]], selected: list[Any], expected: int) -> 
             "recall": true_positive / max(1, expected)}
 
 
+BENCHMARK_PRESETS = (
+    "ai-llm", "ai-agents-llmops", "ml-engineering", "python-backend", "go-backend", "software-general",
+)
+
+
 def run_benchmark(suite: str = "tech-roles", control_only: bool = False) -> dict[str, Any]:
     if suite != "tech-roles":
         raise ValueError(f"unknown benchmark suite: {suite}")
@@ -111,7 +116,7 @@ def run_benchmark(suite: str = "tech-roles", control_only: bool = False) -> dict
         cases = [case for case in cases if case["split"] == "control"]
     rows: list[dict[str, Any]] = []
     by_preset: dict[str, dict[str, Any]] = {}
-    for preset in ROLE_PRESETS:
+    for preset in (p for p in BENCHMARK_PRESETS if p in ROLE_PRESETS):
         preset_rows = [case for case in cases if case["preset"] == preset]
         rules = ROLE_PRESETS[preset]
         profile = {"search": rules, **rules}
